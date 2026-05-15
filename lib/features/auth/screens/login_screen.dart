@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/constants/app_strings.dart';
 import '../../../core/design/design_tokens.dart';
+import '../../../core/network/connectivity_util.dart';
 import '../../../core/design/widgets/gradient_primary_button.dart';
 import '../../../core/design/widgets/premium_card.dart';
 import '../../../core/utils/validators.dart';
@@ -36,6 +37,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
     try {
+      final online = await deviceHasUsableNetwork();
+      if (!online) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No network connection. Turn on Wi‑Fi or mobile data and try again.'),
+          ),
+        );
+        return;
+      }
       await ref.read(authNotifierProvider.notifier).login(email: _email.text, password: _password.text);
       final user = ref.read(authNotifierProvider).user;
       if (!mounted) return;

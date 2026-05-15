@@ -22,7 +22,16 @@ final dioProvider = Provider<Dio>((ref) {
   dio.interceptors.add(
     InterceptorsWrapper(
       onRequest: (options, handler) async {
-        final token = await storage.readToken();
+        // flutter_secure_storage can hang indefinitely on some Android Keystore paths.
+        // Login must not wait on that — otherwise no packet is ever sent to the server.
+        String? token;
+        try {
+          token = await storage
+              .readToken()
+              .timeout(const Duration(seconds: 3), onTimeout: () => null);
+        } catch (_) {
+          token = null;
+        }
         if (token != null && token.isNotEmpty) {
           options.headers['Authorization'] = 'Bearer $token';
         }

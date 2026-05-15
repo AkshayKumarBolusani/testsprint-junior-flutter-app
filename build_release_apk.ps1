@@ -12,6 +12,10 @@
     powershell -ExecutionPolicy Bypass -File .\build_release_apk.ps1
 
   First-time: creating C:\dev may require an elevated PowerShell once, or create C:\dev manually.
+
+  IMPORTANT: Do not run `flutter build apk` from this folder when the path contains spaces
+  (e.g. "JME MEDIA", "TestSprint Junior") — native asset hooks break. Always use this script
+  or build_release_apk.cmd, or move Flutter to C:\flutter and the project to a path without spaces.
 #>
 $ErrorActionPreference = 'Stop'
 
@@ -125,6 +129,16 @@ if (Test-PathHasSpace $sdkLong) {
     Write-Host "  2) Admin CMD: mklink /J C:\flutter `"<your long flutter SDK folder>`"" -ForegroundColor Yellow
     Write-Host "     then prepend C:\flutter\bin to PATH for this session." -ForegroundColor Yellow
     exit 1
+  }
+}
+
+# Prefer the (possibly 8.3) Flutter bin when hooks spawn `dart` / batch helpers — avoids split on space.
+$flutterBinDir = Split-Path -Parent $flutterBat
+$env:PATH = "$flutterBinDir$([System.IO.Path]::PathSeparator)$env:PATH"
+if ($env:FLUTTER_ROOT) {
+  $dartSdk = Join-Path $env:FLUTTER_ROOT 'bin\cache\dart-sdk'
+  if (Test-Path -LiteralPath $dartSdk) {
+    $env:DART_SDK = $dartSdk
   }
 }
 

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -112,7 +114,15 @@ class AuthNotifier extends StateNotifier<AuthState> {
   final Ref ref;
 
   Future<void> bootstrap() async {
-    final token = await ref.read(secureStorageProvider).readToken();
+    String? token;
+    try {
+      token = await ref
+          .read(secureStorageProvider)
+          .readToken()
+          .timeout(const Duration(seconds: 5), onTimeout: () => null);
+    } catch (_) {
+      token = null;
+    }
     if (token == null || token.isEmpty) {
       state = AuthState.guest;
       return;
@@ -120,7 +130,10 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
     try {
       final dio = ref.read(dioProvider);
-      final res = await dio.get(ApiEndpoints.authMe);
+      final res = await dio.get(ApiEndpoints.authMe).timeout(
+        const Duration(seconds: 32),
+        onTimeout: () => throw TimeoutException('GET /api/auth/me'),
+      );
       final map = Map<String, dynamic>.from(res.data as Map);
       if (map['success'] != true) {
         await logout();
@@ -165,7 +178,14 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   Future<void> logout() async {
-    await ref.read(secureStorageProvider).clearToken();
+    try {
+      await ref
+          .read(secureStorageProvider)
+          .clearToken()
+          .timeout(const Duration(seconds: 4), onTimeout: () {});
+    } catch (_) {
+      /* ignore */
+    }
     state = AuthState.guest;
   }
 
