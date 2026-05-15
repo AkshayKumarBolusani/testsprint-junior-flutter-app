@@ -67,7 +67,7 @@ class ManageTestsScreen extends ConsumerWidget {
                             onPressed: () async {
                               try {
                                 final dio = ref.read(dioProvider);
-                                final res = await dio.patch(ApiEndpoints.testPublish(id));
+                                final res = await dio.apiPatch(ApiEndpoints.testPublish(id));
                                 final map = Map<String, dynamic>.from(res.data as Map);
                                 if (map['success'] != true) {
                                   throw DioException(
@@ -193,7 +193,7 @@ class _AddEditTestScreenState extends ConsumerState<AddEditTestScreen> {
     setState(() => _loadingPool = true);
     try {
       final dio = ref.read(dioProvider);
-      final res = await dio.get(
+      final res = await dio.apiGet(
         ApiEndpoints.questions,
         queryParameters: {
           'classLevel': _classLevel,
@@ -252,9 +252,9 @@ class _AddEditTestScreenState extends ConsumerState<AddEditTestScreen> {
       };
       final Response res;
       if (_edit) {
-        res = await dio.put(ApiEndpoints.testById(widget.testId!), data: body);
+        res = await dio.apiPut(ApiEndpoints.testById(widget.testId!), data: body);
       } else {
-        res = await dio.post(ApiEndpoints.tests, data: body);
+        res = await dio.apiPost(ApiEndpoints.tests, data: body);
       }
       final map = Map<String, dynamic>.from(res.data as Map);
       if (map['success'] != true) {
@@ -275,7 +275,7 @@ class _AddEditTestScreenState extends ConsumerState<AddEditTestScreen> {
   Future<void> _delete() async {
     try {
       final dio = ref.read(dioProvider);
-      final res = await dio.delete(ApiEndpoints.testById(widget.testId!));
+      final res = await dio.apiDelete(ApiEndpoints.testById(widget.testId!));
       final map = Map<String, dynamic>.from(res.data as Map);
       if (map['success'] != true) {
         throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());

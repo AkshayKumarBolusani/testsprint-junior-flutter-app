@@ -102,7 +102,7 @@ Rules:
     setState(() => _loading = true);
     try {
       final dio = ref.read(dioProvider);
-      final res = await dio.post(ApiEndpoints.questionsBulk, data: {'items': items});
+      final res = await dio.apiPost(ApiEndpoints.questionsBulk, data: {'items': items});
       final map = Map<String, dynamic>.from(res.data as Map);
       if (map['success'] != true) {
         throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());

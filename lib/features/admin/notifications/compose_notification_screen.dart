@@ -67,7 +67,7 @@ class _ComposeNotificationScreenState extends ConsumerState<ComposeNotificationS
         payload['targetSyllabus'] = _syllabus!;
       }
 
-      final res = await dio.post(ApiEndpoints.notifications, data: payload);
+      final res = await dio.apiPost(ApiEndpoints.notifications, data: payload);
       final map = Map<String, dynamic>.from(res.data as Map);
       if (map['success'] != true) {
         throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());

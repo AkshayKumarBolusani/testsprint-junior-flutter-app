@@ -53,7 +53,7 @@ class _EditStudentScreenState extends ConsumerState<EditStudentScreen> {
     setState(() => _loading = true);
     try {
       final dio = ref.read(dioProvider);
-      final res = await dio.get(ApiEndpoints.studentById(widget.studentId));
+      final res = await dio.apiGet(ApiEndpoints.studentById(widget.studentId));
       final map = Map<String, dynamic>.from(res.data as Map);
       if (map['success'] != true) throw Exception(map['message']?.toString());
       final s = Map<String, dynamic>.from(map['data'] as Map);
@@ -76,7 +76,7 @@ class _EditStudentScreenState extends ConsumerState<EditStudentScreen> {
     setState(() => _saving = true);
     try {
       final dio = ref.read(dioProvider);
-      final res = await dio.put(
+      final res = await dio.apiPut(
         ApiEndpoints.studentById(widget.studentId),
         data: {
           'name': _name.text.trim(),

@@ -29,8 +29,11 @@ class _ManageQuestionsScreenState extends ConsumerState<ManageQuestionsScreen> {
   String? _syllabus;
   String? _subjectId;
   var _pendingOnly = false;
+  var _selecting = false;
+  final _selectedIds = <String>{};
 
   var _loading = false;
+  var _deleting = false;
   List<Map<String, dynamic>> _rows = [];
 
   @override
@@ -48,7 +51,7 @@ class _ManageQuestionsScreenState extends ConsumerState<ManageQuestionsScreen> {
       if (_syllabus != null) qp['syllabus'] = _syllabus;
       if (_subjectId != null) qp['subject'] = _subjectId;
       if (_pendingOnly) qp['reviewStatus'] = 'pending_review';
-      final res = await dio.get(ApiEndpoints.questions, queryParameters: qp.isEmpty ? null : qp);
+      final res = await dio.apiGet(ApiEndpoints.questions, queryParameters: qp.isEmpty ? null : qp);
       final map = Map<String, dynamic>.from(res.data as Map);
       if (map['success'] != true) throw Exception(map['message']?.toString());
       final data = map['data'] as List<dynamic>? ?? [];
@@ -59,6 +62,104 @@ class _ManageQuestionsScreenState extends ConsumerState<ManageQuestionsScreen> {
       }
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _exitSelection() {
+    setState(() {
+      _selecting = false;
+      _selectedIds.clear();
+    });
+  }
+
+  void _enterSelection([String? id]) {
+    setState(() {
+      _selecting = true;
+      if (id != null && id.isNotEmpty) _selectedIds.add(id);
+    });
+  }
+
+  void _toggleSelected(String id) {
+    setState(() {
+      if (_selectedIds.contains(id)) {
+        _selectedIds.remove(id);
+        if (_selectedIds.isEmpty) _selecting = false;
+      } else {
+        _selectedIds.add(id);
+      }
+    });
+  }
+
+  void _selectAllVisible() {
+    setState(() {
+      _selecting = true;
+      _selectedIds
+        ..clear()
+        ..addAll(
+          _rows.map((q) => q['_id']?.toString()).whereType<String>(),
+        );
+    });
+  }
+
+  Future<void> _deleteSelected() async {
+    if (_selectedIds.isEmpty || _deleting) return;
+    final count = _selectedIds.length;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete questions?'),
+        content: Text(
+          'Delete $count selected question${count == 1 ? '' : 's'}? '
+          'They will be removed from any tests that use them.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || ok != true) return;
+
+    setState(() => _deleting = true);
+    try {
+      final dio = ref.read(dioProvider);
+      final ids = _selectedIds.toList();
+      var deleted = 0;
+      for (var i = 0; i < ids.length; i += 100) {
+        final chunk = ids.sublist(i, i + 100 > ids.length ? ids.length : i + 100);
+        final res = await dio.apiPost(
+          ApiEndpoints.questionsBulkDelete,
+          data: {'ids': chunk},
+        );
+        final map = Map<String, dynamic>.from(res.data as Map);
+        if (map['success'] != true) {
+          throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());
+        }
+        final data = map['data'];
+        if (data is Map && data['deletedCount'] != null) {
+          deleted += (data['deletedCount'] as num).toInt();
+        } else {
+          deleted += chunk.length;
+        }
+      }
+      if (!mounted) return;
+      _exitSelection();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$deleted question${deleted == 1 ? '' : 's'} deleted')),
+      );
+      await _fetch();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    } finally {
+      if (mounted) setState(() => _deleting = false);
     }
   }
 
@@ -102,7 +203,7 @@ class _ManageQuestionsScreenState extends ConsumerState<ManageQuestionsScreen> {
     }
     try {
       final dio = ref.read(dioProvider);
-      final res = await dio.patch(ApiEndpoints.questionApprove(id), data: {'correctAnswer': answer});
+      final res = await dio.apiPatch(ApiEndpoints.questionApprove(id), data: {'correctAnswer': answer});
       final map = Map<String, dynamic>.from(res.data as Map);
       if (map['success'] != true) {
         throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());
@@ -124,31 +225,64 @@ class _ManageQuestionsScreenState extends ConsumerState<ManageQuestionsScreen> {
     final canAuthor = AdminAccess.canAuthorCourseSubjectQuestionTest(user);
     final canCompose = AdminAccess.showComposeNotification(user);
 
+    final selectionTitle =
+        _selectedIds.isEmpty ? 'Select questions' : '${_selectedIds.length} selected';
+
     return AdminPageScaffold(
-      title: 'Manage Questions',
+      title: _selecting ? selectionTitle : 'Manage Questions',
       actions: [
-        IconButton(
-          tooltip: _pendingOnly ? 'Show all questions' : 'Pending review only',
-          icon: Icon(_pendingOnly ? Icons.filter_alt : Icons.filter_alt_outlined),
-          onPressed: () {
-            setState(() => _pendingOnly = !_pendingOnly);
-            _fetch();
-          },
-        ),
-        if (canAuthor)
+        if (_selecting) ...[
           IconButton(
-            tooltip: 'Bulk import',
-            icon: const Icon(Icons.upload_file_outlined),
-            onPressed: () => context.push('/admin/questions/bulk'),
+            tooltip: 'Select all on screen',
+            icon: const Icon(Icons.select_all),
+            onPressed: _rows.isEmpty ? null : _selectAllVisible,
           ),
-        if (canCompose)
           IconButton(
-            tooltip: 'Send notification',
-            icon: const Icon(Icons.send_outlined),
-            onPressed: () => context.push('/admin/notifications/compose'),
+            tooltip: 'Delete selected',
+            icon: _deleting
+                ? const SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.delete_outline),
+            onPressed: _selectedIds.isEmpty || _deleting ? null : _deleteSelected,
           ),
+          IconButton(
+            tooltip: 'Cancel selection',
+            icon: const Icon(Icons.close),
+            onPressed: _exitSelection,
+          ),
+        ] else ...[
+          if (canAuthor)
+            IconButton(
+              tooltip: 'Select to delete',
+              icon: const Icon(Icons.checklist),
+              onPressed: _rows.isEmpty ? null : () => _enterSelection(),
+            ),
+          IconButton(
+            tooltip: _pendingOnly ? 'Show all questions' : 'Pending review only',
+            icon: Icon(_pendingOnly ? Icons.filter_alt : Icons.filter_alt_outlined),
+            onPressed: () {
+              setState(() => _pendingOnly = !_pendingOnly);
+              _fetch();
+            },
+          ),
+          if (canAuthor)
+            IconButton(
+              tooltip: 'Bulk import',
+              icon: const Icon(Icons.upload_file_outlined),
+              onPressed: () => context.push('/admin/questions/bulk'),
+            ),
+          if (canCompose)
+            IconButton(
+              tooltip: 'Send notification',
+              icon: const Icon(Icons.send_outlined),
+              onPressed: () => context.push('/admin/notifications/compose'),
+            ),
+        ],
       ],
-      floatingActionButton: canAuthor
+      floatingActionButton: canAuthor && !_selecting
           ? FloatingActionButton.extended(
               onPressed: () => context.push('/admin/questions/new'),
               icon: const Icon(Icons.add),
@@ -242,8 +376,20 @@ class _ManageQuestionsScreenState extends ConsumerState<ManageQuestionsScreen> {
                             final qt = q['questionType']?.toString() ?? '';
                             final review = q['reviewStatus']?.toString() ?? 'approved';
                             final pending = review == 'pending_review';
+                            final selected = _selectedIds.contains(id);
                             return Card(
+                              color: selected
+                                  ? Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.35)
+                                  : null,
                               child: ListTile(
+                                leading: _selecting && canAuthor
+                                    ? Checkbox(
+                                        value: selected,
+                                        onChanged: id.isEmpty
+                                            ? null
+                                            : (_) => _toggleSelected(id),
+                                      )
+                                    : null,
                                 title: Text(text, maxLines: 2, overflow: TextOverflow.ellipsis),
                                 subtitle: Text(
                                   pending ? '$qt · pending review' : qt,
@@ -251,14 +397,32 @@ class _ManageQuestionsScreenState extends ConsumerState<ManageQuestionsScreen> {
                                       ? TextStyle(color: Theme.of(context).colorScheme.tertiary)
                                       : null,
                                 ),
-                                trailing: pending && canAuthor && qt == 'SHORT_ANSWER'
+                                trailing: !_selecting &&
+                                        pending &&
+                                        canAuthor &&
+                                        qt == 'SHORT_ANSWER'
                                     ? IconButton(
                                         tooltip: 'Approve',
                                         icon: const Icon(Icons.check_circle_outline),
                                         onPressed: () => _approvePending(q),
                                       )
                                     : null,
-                                onTap: () => context.push('/admin/questions/$id/edit'),
+                                onTap: () {
+                                  if (_selecting && canAuthor) {
+                                    _toggleSelected(id);
+                                    return;
+                                  }
+                                  context.push('/admin/questions/$id/edit');
+                                },
+                                onLongPress: canAuthor && id.isNotEmpty
+                                    ? () {
+                                        if (!_selecting) {
+                                          _enterSelection(id);
+                                        } else {
+                                          _toggleSelected(id);
+                                        }
+                                      }
+                                    : null,
                               ),
                             );
                           },
@@ -333,7 +497,7 @@ class _AddEditQuestionScreenState extends ConsumerState<AddEditQuestionScreen> {
   Future<void> _load() async {
     try {
       final dio = ref.read(dioProvider);
-      final res = await dio.get(ApiEndpoints.questionById(widget.questionId!));
+      final res = await dio.apiGet(ApiEndpoints.questionById(widget.questionId!));
       final map = Map<String, dynamic>.from(res.data as Map);
       if (map['success'] != true) throw Exception(map['message']?.toString());
       final q = Map<String, dynamic>.from(map['data'] as Map);
@@ -424,9 +588,9 @@ class _AddEditQuestionScreenState extends ConsumerState<AddEditQuestionScreen> {
       }
       final Response res;
       if (_edit) {
-        res = await dio.put(ApiEndpoints.questionById(widget.questionId!), data: base);
+        res = await dio.apiPut(ApiEndpoints.questionById(widget.questionId!), data: base);
       } else {
-        res = await dio.post(ApiEndpoints.questions, data: base);
+        res = await dio.apiPost(ApiEndpoints.questions, data: base);
       }
       final map = Map<String, dynamic>.from(res.data as Map);
       if (map['success'] != true) {
@@ -446,7 +610,7 @@ class _AddEditQuestionScreenState extends ConsumerState<AddEditQuestionScreen> {
   Future<void> _delete() async {
     try {
       final dio = ref.read(dioProvider);
-      final res = await dio.delete(ApiEndpoints.questionById(widget.questionId!));
+      final res = await dio.apiDelete(ApiEndpoints.questionById(widget.questionId!));
       final map = Map<String, dynamic>.from(res.data as Map);
       if (map['success'] != true) {
         throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());

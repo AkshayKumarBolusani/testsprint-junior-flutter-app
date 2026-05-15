@@ -147,9 +147,9 @@ class _AddEditPromoScreenState extends ConsumerState<AddEditPromoScreen> {
       };
       final Response res;
       if (_edit) {
-        res = await dio.put('${ApiEndpoints.promos}/${widget.promoId}', data: body);
+        res = await dio.apiPut('${ApiEndpoints.promos}/${widget.promoId}', data: body);
       } else {
-        res = await dio.post(ApiEndpoints.promos, data: body);
+        res = await dio.apiPost(ApiEndpoints.promos, data: body);
       }
       final map = Map<String, dynamic>.from(res.data as Map);
       if (map['success'] != true) {
@@ -168,7 +168,7 @@ class _AddEditPromoScreenState extends ConsumerState<AddEditPromoScreen> {
   Future<void> _delete() async {
     try {
       final dio = ref.read(dioProvider);
-      final res = await dio.delete('${ApiEndpoints.promos}/${widget.promoId}');
+      final res = await dio.apiDelete('${ApiEndpoints.promos}/${widget.promoId}');
       final map = Map<String, dynamic>.from(res.data as Map);
       if (map['success'] != true) {
         throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());

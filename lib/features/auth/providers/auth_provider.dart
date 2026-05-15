@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_client.dart';
 import '../../../core/network/api_endpoints.dart';
+import '../../../core/storage/auth_session_storage.dart';
 import '../../../core/storage/storage_providers.dart';
 
 class UserModel {
@@ -51,6 +53,18 @@ class UserModel {
     );
   }
 
+  Map<String, dynamic> toJson() => {
+        '_id': id,
+        'name': name,
+        'email': email,
+        'role': role,
+        'status': status,
+        if (phone != null) 'phone': phone,
+        'assignedClasses': assignedClasses,
+        if (studentClass != null) 'studentClass': studentClass,
+        if (syllabus != null) 'syllabus': syllabus,
+      };
+
   /// `GET /api/auth/me` and login payloads use `{ user: {...}, token, ... }`.
   static UserModel fromAuthDataMap(Map<String, dynamic> data) {
     final nested = data['user'];
@@ -58,6 +72,14 @@ class UserModel {
       return UserModel.fromJson(Map<String, dynamic>.from(nested));
     }
     return UserModel.fromJson(Map<String, dynamic>.from(data));
+  }
+
+  static Map<String, dynamic> userJsonFromAuthData(Map<String, dynamic> data) {
+    final nested = data['user'];
+    if (nested is Map) {
+      return Map<String, dynamic>.from(nested);
+    }
+    return Map<String, dynamic>.from(data);
   }
 
   final String id;
@@ -113,44 +135,73 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   final Ref ref;
 
-  Future<void> bootstrap() async {
-    String? token;
+  AuthSessionStorage get _session => ref.read(authSessionStorageProvider);
+
+  UserModel? _readCachedUser() {
+    final raw = _session.cachedUserJson;
+    if (raw == null || raw.isEmpty) return null;
     try {
-      token = await ref
-          .read(secureStorageProvider)
-          .readToken()
-          // Keystore reads can be slow on some devices.
-          .timeout(const Duration(seconds: 20), onTimeout: () => null);
+      final map = jsonDecode(raw);
+      if (map is! Map) return null;
+      return UserModel.fromJson(Map<String, dynamic>.from(map));
     } catch (_) {
-      token = null;
+      return null;
     }
+  }
+
+  Future<void> bootstrap() async {
+    final token = await _session.readToken();
     if (token == null || token.isEmpty) {
       state = AuthState.guest;
       return;
     }
 
+    final cachedUser = _readCachedUser();
+    if (cachedUser != null) {
+      // Restore instantly — do not wait on /api/auth/me (Express path used to hang).
+      state = AuthState(phase: AuthPhase.authenticated, user: cachedUser, token: token);
+    }
+
     try {
       final dio = ref.read(dioProvider);
-      final res = await dio.get(ApiEndpoints.authMe).timeout(
-        const Duration(seconds: 32),
-        onTimeout: () => throw TimeoutException('GET /api/auth/me'),
-      );
+      final res = await dio.apiGet(ApiEndpoints.authMe);
       final map = Map<String, dynamic>.from(res.data as Map);
       if (map['success'] != true) {
-        await logout();
+        if (res.statusCode == 401) {
+          await logout();
+        }
         return;
       }
       final data = Map<String, dynamic>.from(map['data'] as Map);
       final user = UserModel.fromAuthDataMap(data);
+      await _session.saveSession(
+        token: token,
+        userJson: UserModel.userJsonFromAuthData(data),
+      );
       state = AuthState(phase: AuthPhase.authenticated, user: user, token: token);
+    } on DioException catch (e) {
+      // Only clear session when the token is actually invalid — not on timeout/offline.
+      if (e.response?.statusCode == 401) {
+        await logout();
+        return;
+      }
+      if (cachedUser == null) {
+        state = AuthState.guest;
+      }
+    } on TimeoutException {
+      if (cachedUser == null) {
+        state = AuthState.guest;
+      }
     } catch (_) {
-      await logout();
+      if (cachedUser == null) {
+        state = AuthState.guest;
+      }
     }
   }
 
   Future<void> login({required String email, required String password}) async {
     final dio = ref.read(dioProvider);
-    final res = await dio.post(
+    final res = await dio.apiPost(
       ApiEndpoints.authLogin,
       data: {'email': email.trim(), 'password': password},
     );
@@ -166,26 +217,25 @@ class AuthNotifier extends StateNotifier<AuthState> {
     final data = Map<String, dynamic>.from(map['data'] as Map);
     final token = data['token']?.toString() ?? '';
     final user = UserModel.fromAuthDataMap(data);
+    final userJson = UserModel.userJsonFromAuthData(data);
 
-    // Update session immediately so UI + Dio can proceed.
     state = AuthState(phase: AuthPhase.authenticated, user: user, token: token);
-    // Persist token before allowing the user to background/kill the app.
-    await ref.read(secureStorageProvider).saveToken(token);
+    await _session.saveSession(token: token, userJson: userJson);
+    // Best-effort mirror to secure storage (not required for session restore).
+    unawaited(ref.read(secureStorageProvider).saveToken(token));
   }
 
-  /// Updates the cached user without changing token (e.g. after `GET /api/auth/me`).
   void replaceUser(UserModel user) {
     final token = state.token;
     if (token == null || token.isEmpty) return;
     state = AuthState(phase: AuthPhase.authenticated, user: user, token: token);
+    unawaited(_session.saveSession(token: token, userJson: user.toJson()));
   }
 
   Future<void> logout() async {
+    await _session.clearSession();
     try {
-      await ref
-          .read(secureStorageProvider)
-          .clearToken()
-          .timeout(const Duration(seconds: 4), onTimeout: () {});
+      await ref.read(secureStorageProvider).clearToken();
     } catch (_) {
       /* ignore */
     }
@@ -193,16 +243,20 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   Future<void> refreshMe() async {
-    final token = await ref.read(secureStorageProvider).readToken();
+    final token = await _session.readToken();
     if (token == null || token.isEmpty) return;
 
     try {
       final dio = ref.read(dioProvider);
-      final res = await dio.get(ApiEndpoints.authMe);
+      final res = await dio.apiGet(ApiEndpoints.authMe);
       final map = Map<String, dynamic>.from(res.data as Map);
       if (map['success'] != true) return;
       final data = Map<String, dynamic>.from(map['data'] as Map);
       final user = UserModel.fromAuthDataMap(data);
+      await _session.saveSession(
+        token: token,
+        userJson: UserModel.userJsonFromAuthData(data),
+      );
       state = AuthState(phase: AuthPhase.authenticated, user: user, token: token);
     } catch (_) {
       /* ignore */
@@ -220,12 +274,12 @@ final authMeUserProvider = FutureProvider.autoDispose<UserModel>((ref) async {
   if (session.user != null && session.phase == AuthPhase.authenticated) {
     return session.user!;
   }
-  final token = session.token ?? ref.read(secureStorageProvider).cachedToken;
+  final token = session.token ?? ref.read(authSessionStorageProvider).cachedToken;
   if (token == null || token.isEmpty) {
     throw StateError('Not signed in');
   }
   final dio = ref.read(dioProvider);
-  final res = await dio.get(ApiEndpoints.authMe).timeout(const Duration(seconds: 20));
+  final res = await dio.apiGet(ApiEndpoints.authMe);
   final map = Map<String, dynamic>.from(res.data as Map);
   if (map['success'] != true) {
     throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());

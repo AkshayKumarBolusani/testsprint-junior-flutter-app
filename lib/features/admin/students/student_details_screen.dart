@@ -50,7 +50,7 @@ class _DetailsContent extends ConsumerWidget {
   Future<void> _setStatus(WidgetRef ref, BuildContext context, String next) async {
     try {
       final dio = ref.read(dioProvider);
-      final res = await dio.patch(
+      final res = await dio.apiPatch(
         ApiEndpoints.studentStatus(studentId),
         data: {'status': next},
       );
@@ -100,7 +100,7 @@ class _DetailsContent extends ConsumerWidget {
     }
     try {
       final dio = ref.read(dioProvider);
-      final res = await dio.patch(
+      final res = await dio.apiPatch(
         ApiEndpoints.studentPassword(studentId),
         data: {'newPassword': pwd},
       );

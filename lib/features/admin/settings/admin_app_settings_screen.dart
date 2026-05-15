@@ -75,7 +75,7 @@ class _AppSettingsEditorState extends ConsumerState<_AppSettingsEditor> {
     setState(() => _saving = true);
     try {
       final dio = ref.read(dioProvider);
-      final res = await dio.put(
+      final res = await dio.apiPut(
         ApiEndpoints.settingsApp,
         data: {
           'appName': _appName.text.trim(),

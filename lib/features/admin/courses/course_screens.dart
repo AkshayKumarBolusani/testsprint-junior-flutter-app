@@ -115,7 +115,7 @@ class _AddEditCourseScreenState extends ConsumerState<AddEditCourseScreen> {
   Future<void> _load() async {
     try {
       final dio = ref.read(dioProvider);
-      final res = await dio.get(ApiEndpoints.courseById(widget.courseId!));
+      final res = await dio.apiGet(ApiEndpoints.courseById(widget.courseId!));
       final map = Map<String, dynamic>.from(res.data as Map);
       if (map['success'] != true) throw Exception(map['message']?.toString());
       final c = Map<String, dynamic>.from(map['data'] as Map);
@@ -169,9 +169,9 @@ class _AddEditCourseScreenState extends ConsumerState<AddEditCourseScreen> {
       };
       final Response res;
       if (_edit) {
-        res = await dio.put(ApiEndpoints.courseById(widget.courseId!), data: body);
+        res = await dio.apiPut(ApiEndpoints.courseById(widget.courseId!), data: body);
       } else {
-        res = await dio.post(ApiEndpoints.courses, data: body);
+        res = await dio.apiPost(ApiEndpoints.courses, data: body);
       }
       final map = Map<String, dynamic>.from(res.data as Map);
       if (map['success'] != true) {
@@ -202,7 +202,7 @@ class _AddEditCourseScreenState extends ConsumerState<AddEditCourseScreen> {
     if (ok != true) return;
     try {
       final dio = ref.read(dioProvider);
-      final res = await dio.delete(ApiEndpoints.courseById(widget.courseId!));
+      final res = await dio.apiDelete(ApiEndpoints.courseById(widget.courseId!));
       final map = Map<String, dynamic>.from(res.data as Map);
       if (map['success'] != true) {
         throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());

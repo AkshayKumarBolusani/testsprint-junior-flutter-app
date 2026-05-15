@@ -15,6 +15,7 @@ import '../../auth/providers/auth_provider.dart';
 import '../../common/widgets/error_state.dart';
 import '../../../core/widgets/drawer_menu_leading.dart';
 import '../../student/dashboard/student_api_providers.dart';
+import '../admin_api_providers.dart';
 import '../widgets/admin_drawer.dart';
 
 class AdminDashboardScreen extends ConsumerWidget {
@@ -42,7 +43,7 @@ class AdminDashboardScreen extends ConsumerWidget {
               actions: [
                 if (AdminAccess.showSeedDatabase(user))
                   IconButton(
-                    tooltip: 'Seed sample data',
+                    tooltip: 'Rebuild question bank',
                     onPressed: () => _runAdminSeed(context, ref),
                     icon: const Icon(Icons.auto_awesome),
                   ),
@@ -473,9 +474,11 @@ Future<void> _runAdminSeed(BuildContext context, WidgetRef ref) async {
   final go = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
-      title: const Text('Seed sample data?'),
+      title: const Text('Rebuild question bank?'),
       content: const Text(
-        'Creates subjects, courses, questions, tests, promos where missing. Safe to run repeatedly.',
+        'Removes old dummy/sample questions, then ensures 25 real curriculum questions '
+        'for every class and subject (5th–10th). Also creates practice tests and catalog if missing. '
+        'This may take up to a minute.',
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
@@ -486,12 +489,17 @@ Future<void> _runAdminSeed(BuildContext context, WidgetRef ref) async {
   if (go != true || !context.mounted) return;
   try {
     final dio = ref.read(dioProvider);
-    final res = await dio.post(ApiEndpoints.seedDatabase);
+    final res = await dio.apiPost(ApiEndpoints.seedDatabase);
     final map = Map<String, dynamic>.from(res.data as Map);
     if (map['success'] != true) {
       throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());
     }
     ref.invalidate(adminDashboardProvider);
+    ref.invalidate(studentsListProvider);
+    ref.invalidate(coursesListProvider);
+    ref.invalidate(subjectsListProvider);
+    ref.invalidate(adminTestsListProvider);
+    ref.invalidate(promosAdminListProvider);
     if (!context.mounted) return;
     final summary = map['data']?.toString() ?? 'OK';
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Seed complete: $summary')));

@@ -38,6 +38,34 @@ class ApiResponseCache {
       }),
     );
   }
+
+  List<Map<String, dynamic>>? readList(String key, {Duration maxAge = const Duration(minutes: 10)}) {
+    final raw = _prefs.getString('$_prefix$key');
+    if (raw == null) return null;
+    try {
+      final decoded = jsonDecode(raw) as Map<String, dynamic>;
+      final at = decoded['at'] as int?;
+      final data = decoded['data'];
+      if (at == null || data is! List) return null;
+      final age = DateTime.now().millisecondsSinceEpoch - at;
+      if (age > maxAge.inMilliseconds) return null;
+      return data
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> writeList(String key, List<Map<String, dynamic>> items) async {
+    await _prefs.setString(
+      '$_prefix$key',
+      jsonEncode({
+        'at': DateTime.now().millisecondsSinceEpoch,
+        'data': items,
+      }),
+    );
+  }
 }
 
 final apiResponseCacheProvider = Provider<ApiResponseCache>((ref) {

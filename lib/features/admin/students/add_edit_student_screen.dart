@@ -53,7 +53,7 @@ class _AddEditStudentScreenState extends ConsumerState<AddEditStudentScreen> {
     setState(() => _loading = true);
     try {
       final dio = ref.read(dioProvider);
-      final res = await dio.post(
+      final res = await dio.apiPost(
         ApiEndpoints.studentsCreate,
         data: {
           'name': _name.text.trim(),

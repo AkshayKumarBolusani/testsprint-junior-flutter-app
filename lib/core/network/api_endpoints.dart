@@ -39,6 +39,7 @@ class ApiEndpoints {
   static const tests = '/api/tests';
   static const questions = '/api/questions';
   static const questionsBulk = '/api/questions/bulk';
+  static const questionsBulkDelete = '/api/questions/bulk-delete';
   static String questionApprove(String id) => '/api/questions/$id/approve';
   static const promos = '/api/promos';
   static const notifications = '/api/notifications';

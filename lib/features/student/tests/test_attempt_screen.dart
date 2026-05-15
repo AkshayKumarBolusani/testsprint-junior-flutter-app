@@ -111,7 +111,7 @@ class _AttemptBodyState extends ConsumerState<_AttemptBody> {
         return {'questionId': id, 'selectedAnswer': answers[id]};
       }).toList();
 
-      final res = await dio.post(
+      final res = await dio.apiPost(
         ApiEndpoints.resultsSubmit,
         data: {
           'testId': widget.testId,

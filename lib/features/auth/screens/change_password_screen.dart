@@ -44,7 +44,7 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
     setState(() => _loading = true);
     try {
       final dio = ref.read(dioProvider);
-      final res = await dio.post(
+      final res = await dio.apiPost(
         ApiEndpoints.authChangePassword,
         data: {
           'currentPassword': _current.text,

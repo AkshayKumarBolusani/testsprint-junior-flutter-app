@@ -64,7 +64,7 @@ class _AddEditStaffScreenState extends ConsumerState<AddEditStaffScreen> {
     if (!_isEdit) return;
     try {
       final dio = ref.read(dioProvider);
-      final res = await dio.get(ApiEndpoints.userById(widget.staffId!));
+      final res = await dio.apiGet(ApiEndpoints.userById(widget.staffId!));
       final map = Map<String, dynamic>.from(res.data as Map);
       if (map['success'] != true) throw Exception(map['message']?.toString());
       final u = Map<String, dynamic>.from(map['data'] as Map);
@@ -116,7 +116,7 @@ class _AddEditStaffScreenState extends ConsumerState<AddEditStaffScreen> {
         'allClassesAccess': _allClasses,
         if (!_allClasses) 'assignedClasses': _selectedClasses.toList(),
       };
-      final res = await dio.post(ApiEndpoints.usersCreate, data: body);
+      final res = await dio.apiPost(ApiEndpoints.usersCreate, data: body);
       final map = Map<String, dynamic>.from(res.data as Map);
       if (map['success'] != true) {
         throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());
@@ -137,7 +137,7 @@ class _AddEditStaffScreenState extends ConsumerState<AddEditStaffScreen> {
     setState(() => _saving = true);
     try {
       final dio = ref.read(dioProvider);
-      final res = await dio.put(
+      final res = await dio.apiPut(
         ApiEndpoints.userById(widget.staffId!),
         data: {
           'name': _name.text.trim(),
@@ -164,7 +164,7 @@ class _AddEditStaffScreenState extends ConsumerState<AddEditStaffScreen> {
     setState(() => _saving = true);
     try {
       final dio = ref.read(dioProvider);
-      final res = await dio.patch(
+      final res = await dio.apiPatch(
         ApiEndpoints.userAccess(widget.staffId!),
         data: {
           'allClassesAccess': _allClasses,
@@ -193,7 +193,7 @@ class _AddEditStaffScreenState extends ConsumerState<AddEditStaffScreen> {
     setState(() => _saving = true);
     try {
       final dio = ref.read(dioProvider);
-      final res = await dio.patch(
+      final res = await dio.apiPatch(
         ApiEndpoints.userPassword(widget.staffId!),
         data: {'newPassword': _pwdReset.text.trim()},
       );
@@ -226,7 +226,7 @@ class _AddEditStaffScreenState extends ConsumerState<AddEditStaffScreen> {
     if (ok != true) return;
     try {
       final dio = ref.read(dioProvider);
-      final res = await dio.delete(ApiEndpoints.userById(widget.staffId!));
+      final res = await dio.apiDelete(ApiEndpoints.userById(widget.staffId!));
       final map = Map<String, dynamic>.from(res.data as Map);
       if (map['success'] != true) {
         throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());

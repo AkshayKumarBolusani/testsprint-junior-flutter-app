@@ -7,20 +7,14 @@ import '../../../core/network/api_cache.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/network/api_endpoints.dart';
 
-const _dashboardTimeout = Duration(seconds: 22);
-
 Future<Map<String, dynamic>> _fetchDashboardMap(
   Dio dio,
   String path, {
   required ApiResponseCache cache,
   required String cacheKey,
 }) async {
-  final res = await dio.get(path).timeout(_dashboardTimeout);
-  final map = Map<String, dynamic>.from(res.data as Map);
-  if (map['success'] != true) {
-    throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());
-  }
-  final data = Map<String, dynamic>.from(map['data'] as Map);
+  final res = await dio.apiGet(path);
+  final data = parseSuccessDataMap(res);
   unawaited(cache.writeMap(cacheKey, data));
   return data;
 }
@@ -98,107 +92,150 @@ final adminDashboardProvider = FutureProvider.autoDispose<Map<String, dynamic>>(
 });
 
 final studentAvailableTestsProvider = FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
-  final dio = ref.watch(dioProvider);
-  final res = await dio.get(ApiEndpoints.testsAvailable);
-  final map = Map<String, dynamic>.from(res.data as Map);
-  if (map['success'] != true) {
-    throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());
+  final link = ref.keepAlive();
+  Timer(const Duration(minutes: 5), link.close);
+
+  final cache = ref.watch(apiResponseCacheProvider);
+  const cacheKey = 'student_tests_available';
+  final cached = cache.readList(cacheKey);
+  if (cached != null) {
+    unawaited(_refreshTestsAvailable(ref));
+    return cached;
   }
-  final data = map['data'] as List<dynamic>;
-  return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+
+  final dio = ref.watch(dioProvider);
+  final res = await dio.apiGet(ApiEndpoints.testsAvailable);
+  final list = parseSuccessList(res);
+  unawaited(cache.writeList(cacheKey, list));
+  return list;
 });
+
+Future<void> _refreshTestsAvailable(Ref ref) async {
+  try {
+    final dio = ref.read(dioProvider);
+    final cache = ref.read(apiResponseCacheProvider);
+    final res = await dio.apiGet(ApiEndpoints.testsAvailable);
+    final list = parseSuccessList(res);
+    unawaited(cache.writeList('student_tests_available', list));
+  } catch (_) {}
+}
 
 final studentPromosProvider = FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
   final dio = ref.watch(dioProvider);
-  final res = await dio.get(ApiEndpoints.promosStudent);
-  final map = Map<String, dynamic>.from(res.data as Map);
-  if (map['success'] != true) {
-    throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());
-  }
-  final data = map['data'] as List<dynamic>;
-  return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  final res = await dio.apiGet(ApiEndpoints.promosStudent);
+  return parseSuccessList(res);
 });
 
 final appSettingsAdminProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
   final dio = ref.watch(dioProvider);
-  final res = await dio.get(ApiEndpoints.settingsApp);
-  final map = Map<String, dynamic>.from(res.data as Map);
-  if (map['success'] != true) {
-    throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());
-  }
-  return Map<String, dynamic>.from(map['data'] as Map);
+  final res = await dio.apiGet(ApiEndpoints.settingsApp);
+  return parseSuccessDataMap(res);
 });
 
 final notificationsListProvider = FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
-  final dio = ref.watch(dioProvider);
-  final res = await dio.get(ApiEndpoints.notifications);
-  final map = Map<String, dynamic>.from(res.data as Map);
-  if (map['success'] != true) {
-    throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());
+  final link = ref.keepAlive();
+  Timer(const Duration(minutes: 3), link.close);
+
+  final cache = ref.watch(apiResponseCacheProvider);
+  const cacheKey = 'notifications';
+  final cached = cache.readList(cacheKey);
+  if (cached != null) {
+    unawaited(_refreshNotifications(ref));
+    return cached;
   }
-  final data = map['data'] as List<dynamic>? ?? [];
-  return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+
+  final dio = ref.watch(dioProvider);
+  final res = await dio.apiGet(ApiEndpoints.notifications);
+  final list = parseSuccessList(res);
+  unawaited(cache.writeList(cacheKey, list));
+  return list;
 });
+
+Future<void> _refreshNotifications(Ref ref) async {
+  try {
+    final dio = ref.read(dioProvider);
+    final cache = ref.read(apiResponseCacheProvider);
+    final res = await dio.apiGet(ApiEndpoints.notifications);
+    unawaited(cache.writeList('notifications', parseSuccessList(res)));
+  } catch (_) {}
+}
 
 final studentsListProvider = FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
-  final dio = ref.watch(dioProvider);
-  final res = await dio.get(ApiEndpoints.students);
-  final map = Map<String, dynamic>.from(res.data as Map);
-  if (map['success'] != true) {
-    throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());
+  final link = ref.keepAlive();
+  Timer(const Duration(minutes: 5), link.close);
+
+  final cache = ref.watch(apiResponseCacheProvider);
+  const cacheKey = 'admin_students';
+  final cached = cache.readList(cacheKey);
+  if (cached != null) {
+    unawaited(_refreshStudentsList(ref));
+    return cached;
   }
-  final data = map['data'] as List<dynamic>;
-  return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+
+  final dio = ref.watch(dioProvider);
+  final res = await dio.apiGet(ApiEndpoints.students);
+  final list = parseSuccessList(res);
+  unawaited(cache.writeList(cacheKey, list));
+  return list;
 });
 
+Future<void> _refreshStudentsList(Ref ref) async {
+  try {
+    final dio = ref.read(dioProvider);
+    final cache = ref.read(apiResponseCacheProvider);
+    final res = await dio.apiGet(ApiEndpoints.students);
+    unawaited(cache.writeList('admin_students', parseSuccessList(res)));
+  } catch (_) {}
+}
+
 final studentResultsProvider = FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {
-  final dio = ref.watch(dioProvider);
-  final res = await dio.get(ApiEndpoints.resultsMy);
-  final map = Map<String, dynamic>.from(res.data as Map);
-  if (map['success'] != true) {
-    throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());
+  final link = ref.keepAlive();
+  Timer(const Duration(minutes: 5), link.close);
+
+  final cache = ref.watch(apiResponseCacheProvider);
+  const cacheKey = 'student_results';
+  final cached = cache.readList(cacheKey);
+  if (cached != null) {
+    unawaited(_refreshStudentResults(ref));
+    return cached;
   }
-  final data = map['data'] as List<dynamic>;
-  return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+
+  final dio = ref.watch(dioProvider);
+  final res = await dio.apiGet(ApiEndpoints.resultsMy);
+  final list = parseSuccessList(res);
+  unawaited(cache.writeList(cacheKey, list));
+  return list;
 });
+
+Future<void> _refreshStudentResults(Ref ref) async {
+  try {
+    final dio = ref.read(dioProvider);
+    final cache = ref.read(apiResponseCacheProvider);
+    final res = await dio.apiGet(ApiEndpoints.resultsMy);
+    unawaited(cache.writeList('student_results', parseSuccessList(res)));
+  } catch (_) {}
+}
 
 final testDetailProvider = FutureProvider.autoDispose.family<Map<String, dynamic>, String>((ref, id) async {
   final dio = ref.watch(dioProvider);
-  final res = await dio.get(ApiEndpoints.testById(id));
-  final map = Map<String, dynamic>.from(res.data as Map);
-  if (map['success'] != true) {
-    throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());
-  }
-  return Map<String, dynamic>.from(map['data'] as Map);
+  final res = await dio.apiGet(ApiEndpoints.testById(id));
+  return parseSuccessDataMap(res);
 });
 
 final resultDetailProvider = FutureProvider.autoDispose.family<Map<String, dynamic>, String>((ref, id) async {
   final dio = ref.watch(dioProvider);
-  final res = await dio.get(ApiEndpoints.resultById(id));
-  final map = Map<String, dynamic>.from(res.data as Map);
-  if (map['success'] != true) {
-    throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());
-  }
-  return Map<String, dynamic>.from(map['data'] as Map);
+  final res = await dio.apiGet(ApiEndpoints.resultById(id));
+  return parseSuccessDataMap(res);
 });
 
 final rankingsProvider = FutureProvider.autoDispose.family<List<Map<String, dynamic>>, String>((ref, testId) async {
   final dio = ref.watch(dioProvider);
-  final res = await dio.get(ApiEndpoints.rankingsByTest(testId));
-  final map = Map<String, dynamic>.from(res.data as Map);
-  if (map['success'] != true) {
-    throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());
-  }
-  final data = map['data'] as List<dynamic>;
-  return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  final res = await dio.apiGet(ApiEndpoints.rankingsByTest(testId));
+  return parseSuccessList(res);
 });
 
 final studentDetailProvider = FutureProvider.autoDispose.family<Map<String, dynamic>, String>((ref, id) async {
   final dio = ref.watch(dioProvider);
-  final res = await dio.get(ApiEndpoints.studentById(id));
-  final map = Map<String, dynamic>.from(res.data as Map);
-  if (map['success'] != true) {
-    throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());
-  }
-  return Map<String, dynamic>.from(map['data'] as Map);
+  final res = await dio.apiGet(ApiEndpoints.studentById(id));
+  return parseSuccessDataMap(res);
 });
