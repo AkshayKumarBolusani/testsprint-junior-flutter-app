@@ -33,6 +33,7 @@ class ApiEndpoints {
   static String subjectById(String id) => '/api/subjects/$id';
   static String questionById(String id) => '/api/questions/$id';
   static String testPublish(String id) => '/api/tests/$id/publish';
+  static String testDuplicate(String id) => '/api/tests/$id/duplicate';
   static String resultsForTest(String testId) => '/api/results/test/$testId';
   static const courses = '/api/courses';
   static const subjects = '/api/subjects';

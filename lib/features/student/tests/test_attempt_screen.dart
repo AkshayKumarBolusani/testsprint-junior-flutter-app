@@ -10,6 +10,8 @@ import '../../../core/design/widgets/gradient_primary_button.dart';
 import '../../../core/design/widgets/premium_card.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/network/api_endpoints.dart';
+import '../../../core/security/app_security.dart';
+import '../../../core/security/test_attempt_session.dart';
 import '../../common/widgets/confirm_dialog.dart';
 import '../../common/widgets/error_state.dart';
 import '../../common/widgets/loading_widget.dart';
@@ -47,24 +49,29 @@ class _AttemptBody extends ConsumerStatefulWidget {
   ConsumerState<_AttemptBody> createState() => _AttemptBodyState();
 }
 
-class _AttemptBodyState extends ConsumerState<_AttemptBody> {
+class _AttemptBodyState extends ConsumerState<_AttemptBody> with WidgetsBindingObserver {
   late final List<Map<String, dynamic>> questions;
   int index = 0;
   final Map<String, dynamic> answers = {};
 
   Timer? timer;
+  Timer? quitTimer;
   int secondsRemaining = 0;
+  int? quitCountdown;
 
   bool submitting = false;
+  bool blocked = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final raw = widget.test['questions'] as List<dynamic>? ?? [];
     questions = raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
 
     final minutes = int.tryParse(widget.test['durationMinutes']?.toString() ?? '') ?? 60;
     secondsRemaining = minutes * 60;
+
     timer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (!mounted) return;
       if (secondsRemaining <= 1) {
@@ -74,26 +81,128 @@ class _AttemptBodyState extends ConsumerState<_AttemptBody> {
       }
       setState(() => secondsRemaining -= 1);
     });
+
+    unawaited(_bootstrap());
+  }
+
+  Future<void> _bootstrap() async {
+    if (await AppSecurity.isDeviceCompromised()) {
+      if (!mounted) return;
+      setState(() => blocked = true);
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Device not allowed'),
+          content: const Text(
+            'Tests cannot run on rooted/jailbroken devices or emulators with mock location. '
+            'Use a standard phone or tablet.',
+          ),
+          actions: [
+            FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+          ],
+        ),
+      );
+      if (mounted) context.pop();
+      return;
+    }
+
+    await AppSecurity.enableTestShield();
+
+    final pending = await TestAttemptSession.load();
+    if (pending != null && pending.testId == widget.testId) {
+      answers.addAll(pending.answers);
+      if (pending.shouldAutoSubmit()) {
+        await _submit(auto: true, restored: true);
+        return;
+      }
+      _startQuitCountdown(pending.countdownRemaining());
+    }
+  }
+
+  void _startQuitCountdown(int seconds) {
+    quitTimer?.cancel();
+    setState(() => quitCountdown = seconds);
+    quitTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      final next = (quitCountdown ?? 0) - 1;
+      if (next <= 0) {
+        t.cancel();
+        setState(() => quitCountdown = null);
+        _submit(auto: true, restored: true);
+        return;
+      }
+      setState(() => quitCountdown = next);
+    });
+  }
+
+  void _cancelQuitCountdown() {
+    quitTimer?.cancel();
+    quitTimer = null;
+    if (quitCountdown != null) {
+      setState(() => quitCountdown = null);
+    }
+    unawaited(TestAttemptSession.clear());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (submitting || blocked) return;
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_onResumed());
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _onPaused();
+    }
+  }
+
+  void _onPaused() {
+    unawaited(
+      TestAttemptSession.save(
+        testId: widget.testId,
+        answers: Map<String, dynamic>.from(answers),
+        secondsRemaining: secondsRemaining,
+        quitAt: DateTime.now(),
+      ),
+    );
+    _startQuitCountdown(TestAttemptSession.quitGraceSeconds);
+  }
+
+  Future<void> _onResumed() async {
+    final pending = await TestAttemptSession.load();
+    if (pending == null || pending.testId != widget.testId) {
+      _cancelQuitCountdown();
+      return;
+    }
+    if (pending.shouldAutoSubmit()) {
+      await _submit(auto: true, restored: true);
+    } else {
+      _startQuitCountdown(pending.countdownRemaining());
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     timer?.cancel();
+    quitTimer?.cancel();
+    unawaited(AppSecurity.disableTestShield());
     super.dispose();
   }
 
   String _fmt(int secs) {
     final m = secs ~/ 60;
     final s = secs % 60;
-    final mm = m.toString().padLeft(2, '0');
-    final ss = s.toString().padLeft(2, '0');
-    return '$mm:$ss';
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
 
-  Future<void> _submit({bool auto = false}) async {
-    if (submitting) return;
+  Future<void> _submit({bool auto = false, bool restored = false}) async {
+    if (submitting || blocked) return;
 
-    if (!auto) {
+    if (!auto && !restored) {
       final ok = await showConfirmDialog(
         context: context,
         title: 'Submit test?',
@@ -103,6 +212,8 @@ class _AttemptBodyState extends ConsumerState<_AttemptBody> {
     }
 
     setState(() => submitting = true);
+    _cancelQuitCountdown();
+    timer?.cancel();
 
     try {
       final dio = ref.read(dioProvider);
@@ -124,20 +235,33 @@ class _AttemptBodyState extends ConsumerState<_AttemptBody> {
         throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());
       }
 
+      await TestAttemptSession.clear();
       final created = Map<String, dynamic>.from(map['data'] as Map);
       final rid = created['_id']?.toString();
       if (!mounted || rid == null) return;
-
       context.go('/student/results/$rid');
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
       setState(() => submitting = false);
+      timer = Timer.periodic(const Duration(seconds: 1), (t) {
+        if (!mounted) return;
+        if (secondsRemaining <= 1) {
+          t.cancel();
+          _submit(auto: true);
+          return;
+        }
+        setState(() => secondsRemaining -= 1);
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (blocked) {
+      return const Center(child: Text('Test unavailable on this device.'));
+    }
+
     if (questions.isEmpty) {
       return const Center(child: Text('This test has no questions.'));
     }
@@ -148,7 +272,6 @@ class _AttemptBodyState extends ConsumerState<_AttemptBody> {
     final type = q['questionType']?.toString() ?? 'MCQ';
 
     Widget questionWidget;
-
     if (type == 'MCQ') {
       final opts = (q['options'] as List<dynamic>? ?? []).map((e) => e.toString()).toList();
       questionWidget = Column(
@@ -202,6 +325,20 @@ class _AttemptBodyState extends ConsumerState<_AttemptBody> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (quitCountdown != null)
+            MaterialBanner(
+              backgroundColor: scheme.errorContainer,
+              content: Text(
+                'App left — auto-submit in ${quitCountdown}s. Return now to continue.',
+                style: TextStyle(color: scheme.onErrorContainer),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: submitting ? null : _cancelQuitCountdown,
+                  child: const Text('Continue test'),
+                ),
+              ],
+            ),
           PremiumCard(
             padding: const EdgeInsets.all(AppSpacing.s16),
             child: Column(
@@ -214,7 +351,10 @@ class _AttemptBodyState extends ConsumerState<_AttemptBody> {
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(999),
                         gradient: LinearGradient(
-                          colors: [scheme.primary.withValues(alpha: 0.15), scheme.secondary.withValues(alpha: 0.1)],
+                          colors: [
+                            scheme.primary.withValues(alpha: 0.15),
+                            scheme.secondary.withValues(alpha: 0.1),
+                          ],
                         ),
                       ),
                       child: Row(

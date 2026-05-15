@@ -8,9 +8,8 @@ import 'package:permission_handler/permission_handler.dart';
 Future<void> requestLaunchPermissions() async {
   if (!Platform.isAndroid && !Platform.isIOS) return;
 
-  final notification = Permission.notification;
-  final status = await notification.status;
+  final status = await Permission.notification.status;
   if (status.isGranted || status.isLimited) return;
   if (status.isPermanentlyDenied) return;
-  await notification.request();
+  await Permission.notification.request();
 }

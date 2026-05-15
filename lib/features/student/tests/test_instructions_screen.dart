@@ -26,6 +26,10 @@ class TestInstructionsScreen extends ConsumerWidget {
           final desc = test['description']?.toString() ?? '';
           final marks = test['totalMarks']?.toString() ?? '';
           final duration = test['durationMinutes']?.toString() ?? '';
+          final maxAttempts = test['maxAttempts'] ?? 1;
+          final attemptsUsed = test['attemptsUsed'] ?? 0;
+          final attemptsRemaining = test['attemptsRemaining'] ?? maxAttempts;
+          final canStart = (attemptsRemaining as num) > 0;
 
           return Padding(
             padding: const EdgeInsets.all(16),
@@ -35,12 +39,18 @@ class TestInstructionsScreen extends ConsumerWidget {
                 Text(title, style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 12),
                 Text('Duration: $duration minutes • Total marks: $marks'),
+                Text('Attempts: $attemptsUsed / $maxAttempts used'),
                 const SizedBox(height: 12),
                 Text(desc),
+                const SizedBox(height: 16),
+                const Text(
+                  'Leaving the app during a test starts a 10-second countdown, then your test is submitted automatically. '
+                  'Screenshots and screen recording are blocked during the attempt.',
+                ),
                 const Spacer(),
                 FilledButton(
-                  onPressed: () => context.go('/student/tests/$testId/attempt'),
-                  child: const Text('Start test'),
+                  onPressed: canStart ? () => context.go('/student/tests/$testId/attempt') : null,
+                  child: Text(canStart ? 'Start test' : 'No attempts left'),
                 ),
               ],
             ),

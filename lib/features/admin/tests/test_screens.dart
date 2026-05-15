@@ -86,6 +86,34 @@ class ManageTestsScreen extends ConsumerWidget {
                               }
                             },
                           ),
+                        if (canAuthor)
+                          IconButton(
+                            tooltip: 'Duplicate test',
+                            icon: const Icon(Icons.copy_outlined),
+                            onPressed: () async {
+                              try {
+                                final dio = ref.read(dioProvider);
+                                final res = await dio.apiPost(ApiEndpoints.testDuplicate(id));
+                                final map = Map<String, dynamic>.from(res.data as Map);
+                                if (map['success'] != true) {
+                                  throw DioException(
+                                    requestOptions: res.requestOptions,
+                                    message: map['message']?.toString(),
+                                  );
+                                }
+                                ref.invalidate(adminTestsListProvider);
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Duplicated as draft')),
+                                  );
+                                }
+                              } catch (e) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+                                }
+                              }
+                            },
+                          ),
                         const Icon(Icons.chevron_right),
                       ],
                     ),
@@ -116,6 +144,7 @@ class _AddEditTestScreenState extends ConsumerState<AddEditTestScreen> {
   final _description = TextEditingController();
   final _duration = TextEditingController(text: '60');
   final _marks = TextEditingController(text: '100');
+  final _maxAttempts = TextEditingController(text: '1');
 
   String _testType = DomainConstants.testTypes.first;
   String _classLevel = DomainConstants.classLevels.first;
@@ -137,6 +166,7 @@ class _AddEditTestScreenState extends ConsumerState<AddEditTestScreen> {
     _description.dispose();
     _duration.dispose();
     _marks.dispose();
+    _maxAttempts.dispose();
     super.dispose();
   }
 
@@ -160,6 +190,7 @@ class _AddEditTestScreenState extends ConsumerState<AddEditTestScreen> {
       _status = map['status']?.toString() ?? _status;
       _duration.text = map['durationMinutes']?.toString() ?? '60';
       _marks.text = map['totalMarks']?.toString() ?? '100';
+      _maxAttempts.text = map['maxAttempts']?.toString() ?? '1';
       final sub = map['subject'];
       if (sub is Map) {
         _subjectId = sub['_id']?.toString();
@@ -234,6 +265,13 @@ class _AddEditTestScreenState extends ConsumerState<AddEditTestScreen> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Invalid marks')));
       return;
     }
+    final maxAttempts = int.tryParse(_maxAttempts.text.trim());
+    if (maxAttempts == null || maxAttempts < 1 || maxAttempts > 20) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Attempts must be between 1 and 20')),
+      );
+      return;
+    }
 
     setState(() => _saving = true);
     try {
@@ -247,6 +285,7 @@ class _AddEditTestScreenState extends ConsumerState<AddEditTestScreen> {
         'subject': _subjectId,
         'durationMinutes': dur,
         'totalMarks': marks,
+        'maxAttempts': maxAttempts,
         'questions': _qIds.toList(),
         'status': _status,
       };
@@ -269,6 +308,28 @@ class _AddEditTestScreenState extends ConsumerState<AddEditTestScreen> {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
     } finally {
       if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _duplicate() async {
+    if (widget.testId == null) return;
+    try {
+      final dio = ref.read(dioProvider);
+      final res = await dio.apiPost(ApiEndpoints.testDuplicate(widget.testId!));
+      final map = Map<String, dynamic>.from(res.data as Map);
+      if (map['success'] != true) {
+        throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());
+      }
+      ref.invalidate(adminTestsListProvider);
+      if (!mounted) return;
+      final data = Map<String, dynamic>.from(map['data'] as Map);
+      final newId = data['_id']?.toString();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Test duplicated as draft')),
+      );
+      if (newId != null) context.pushReplacement('/admin/tests/$newId/edit');
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
     }
   }
 
@@ -408,6 +469,13 @@ class _AddEditTestScreenState extends ConsumerState<AddEditTestScreen> {
                 ],
               ),
               const SizedBox(height: 12),
+              AppTextField(
+                controller: _maxAttempts,
+                label: 'Max attempts per student',
+                keyboardType: TextInputType.number,
+                validator: (v) => Validators.required(v, 'Attempts'),
+              ),
+              const SizedBox(height: 12),
               DropdownField<String>(
                 label: 'Status',
                 value: _status,
@@ -439,6 +507,12 @@ class _AddEditTestScreenState extends ConsumerState<AddEditTestScreen> {
               if (canAuthor) ...[
                 AppButton(label: _edit ? 'Save test' : 'Create test', isLoading: _saving, onPressed: _save),
                 if (_edit) ...[
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _duplicate,
+                    icon: const Icon(Icons.copy_outlined),
+                    label: const Text('Duplicate test'),
+                  ),
                   const SizedBox(height: 12),
                   OutlinedButton.icon(
                     onPressed: _delete,
