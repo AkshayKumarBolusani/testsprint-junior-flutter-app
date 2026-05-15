@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -11,10 +13,9 @@ final dioProvider = Provider<Dio>((ref) {
   final dio = Dio(
     BaseOptions(
       baseUrl: AppConfig.apiBaseUrl,
-      // Vercel cold start + Mongo + TLS on slow mobile links can exceed 30s.
-      connectTimeout: const Duration(seconds: 30),
-      receiveTimeout: const Duration(seconds: 90),
-      sendTimeout: const Duration(seconds: 30),
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 25),
+      sendTimeout: const Duration(seconds: 15),
       headers: {'Content-Type': 'application/json'},
     ),
   );
@@ -22,15 +23,18 @@ final dioProvider = Provider<Dio>((ref) {
   dio.interceptors.add(
     InterceptorsWrapper(
       onRequest: (options, handler) async {
-        // flutter_secure_storage can hang indefinitely on some Android Keystore paths.
-        // Login must not wait on that — otherwise no packet is ever sent to the server.
-        String? token;
-        try {
-          token = await storage
-              .readToken()
-              .timeout(const Duration(seconds: 3), onTimeout: () => null);
-        } catch (_) {
-          token = null;
+        // Prefer in-memory session token (instant). Avoid slow Keystore on every request.
+        String? token = ref.read(authNotifierProvider).token;
+        token ??= storage.cachedToken;
+        if (token == null || token.isEmpty) {
+          try {
+            token = await storage
+                .readToken()
+                // If the token isn't in memory (fresh app start), keystore I/O may be slow.
+                .timeout(const Duration(milliseconds: 2500), onTimeout: () => null);
+          } catch (_) {
+            token = null;
+          }
         }
         if (token != null && token.isNotEmpty) {
           options.headers['Authorization'] = 'Bearer $token';
@@ -41,7 +45,7 @@ final dioProvider = Provider<Dio>((ref) {
         if (e.response?.statusCode == 401) {
           final path = e.requestOptions.path;
           if (!path.contains('/api/auth/login')) {
-            await ref.read(authNotifierProvider.notifier).logout();
+            unawaited(ref.read(authNotifierProvider.notifier).logout());
           }
         }
         handler.next(e);

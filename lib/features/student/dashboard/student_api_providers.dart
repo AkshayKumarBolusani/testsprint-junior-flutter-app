@@ -1,27 +1,100 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/network/api_cache.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/network/api_endpoints.dart';
 
-final studentDashboardProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
-  final dio = ref.watch(dioProvider);
-  final res = await dio.get(ApiEndpoints.studentDashboard);
+const _dashboardTimeout = Duration(seconds: 22);
+
+Future<Map<String, dynamic>> _fetchDashboardMap(
+  Dio dio,
+  String path, {
+  required ApiResponseCache cache,
+  required String cacheKey,
+}) async {
+  final res = await dio.get(path).timeout(_dashboardTimeout);
   final map = Map<String, dynamic>.from(res.data as Map);
   if (map['success'] != true) {
     throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());
   }
-  return Map<String, dynamic>.from(map['data'] as Map);
+  final data = Map<String, dynamic>.from(map['data'] as Map);
+  unawaited(cache.writeMap(cacheKey, data));
+  return data;
+}
+
+final studentDashboardProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
+  final link = ref.keepAlive();
+  Timer(const Duration(minutes: 5), link.close);
+
+  final cache = ref.watch(apiResponseCacheProvider);
+  final cached = cache.readMap('student_dashboard');
+  if (cached != null) {
+    unawaited(_refreshStudentDashboard(ref));
+    return cached;
+  }
+
+  final dio = ref.watch(dioProvider);
+  return _fetchDashboardMap(
+    dio,
+    ApiEndpoints.studentDashboard,
+    cache: cache,
+    cacheKey: 'student_dashboard',
+  );
 });
 
-final adminDashboardProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
-  final dio = ref.watch(dioProvider);
-  final res = await dio.get(ApiEndpoints.adminDashboard);
-  final map = Map<String, dynamic>.from(res.data as Map);
-  if (map['success'] != true) {
-    throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());
+Future<void> _refreshStudentDashboard(Ref ref) async {
+  try {
+    final dio = ref.read(dioProvider);
+    final cache = ref.read(apiResponseCacheProvider);
+    await _fetchDashboardMap(
+      dio,
+      ApiEndpoints.studentDashboard,
+      cache: cache,
+      cacheKey: 'student_dashboard',
+    );
+    ref.invalidate(studentDashboardProvider);
+  } catch (_) {
+    /* keep stale cache */
   }
-  return Map<String, dynamic>.from(map['data'] as Map);
+}
+
+Future<void> _refreshAdminDashboard(Ref ref) async {
+  try {
+    final dio = ref.read(dioProvider);
+    final cache = ref.read(apiResponseCacheProvider);
+    await _fetchDashboardMap(
+      dio,
+      ApiEndpoints.adminDashboard,
+      cache: cache,
+      cacheKey: 'admin_dashboard',
+    );
+    ref.invalidate(adminDashboardProvider);
+  } catch (_) {
+    /* keep stale cache */
+  }
+}
+
+final adminDashboardProvider = FutureProvider.autoDispose<Map<String, dynamic>>((ref) async {
+  final link = ref.keepAlive();
+  Timer(const Duration(minutes: 5), link.close);
+
+  final cache = ref.watch(apiResponseCacheProvider);
+  final cached = cache.readMap('admin_dashboard');
+  if (cached != null) {
+    unawaited(_refreshAdminDashboard(ref));
+    return cached;
+  }
+
+  final dio = ref.watch(dioProvider);
+  return _fetchDashboardMap(
+    dio,
+    ApiEndpoints.adminDashboard,
+    cache: cache,
+    cacheKey: 'admin_dashboard',
+  );
 });
 
 final studentAvailableTestsProvider = FutureProvider.autoDispose<List<Map<String, dynamic>>>((ref) async {

@@ -119,7 +119,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
       token = await ref
           .read(secureStorageProvider)
           .readToken()
-          .timeout(const Duration(seconds: 5), onTimeout: () => null);
+          // Keystore reads can be slow on some devices.
+          .timeout(const Duration(seconds: 20), onTimeout: () => null);
     } catch (_) {
       token = null;
     }
@@ -166,8 +167,10 @@ class AuthNotifier extends StateNotifier<AuthState> {
     final token = data['token']?.toString() ?? '';
     final user = UserModel.fromAuthDataMap(data);
 
-    await ref.read(secureStorageProvider).saveToken(token);
+    // Update session immediately so UI + Dio can proceed.
     state = AuthState(phase: AuthPhase.authenticated, user: user, token: token);
+    // Persist token before allowing the user to background/kill the app.
+    await ref.read(secureStorageProvider).saveToken(token);
   }
 
   /// Updates the cached user without changing token (e.g. after `GET /api/auth/me`).
@@ -213,12 +216,16 @@ final authNotifierProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref
 
 /// Current session user from the server (keeps [authNotifierProvider] in sync for drawer / guards).
 final authMeUserProvider = FutureProvider.autoDispose<UserModel>((ref) async {
-  final token = await ref.read(secureStorageProvider).readToken();
+  final session = ref.read(authNotifierProvider);
+  if (session.user != null && session.phase == AuthPhase.authenticated) {
+    return session.user!;
+  }
+  final token = session.token ?? ref.read(secureStorageProvider).cachedToken;
   if (token == null || token.isEmpty) {
     throw StateError('Not signed in');
   }
   final dio = ref.read(dioProvider);
-  final res = await dio.get(ApiEndpoints.authMe);
+  final res = await dio.get(ApiEndpoints.authMe).timeout(const Duration(seconds: 20));
   final map = Map<String, dynamic>.from(res.data as Map);
   if (map['success'] != true) {
     throw DioException(requestOptions: res.requestOptions, message: map['message']?.toString());
